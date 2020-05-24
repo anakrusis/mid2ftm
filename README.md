@@ -1,2 +1,4 @@
 # mid2ftm
-MIDI to Famitracker Module converter
+MIDI to FamiTracker Module converter
+
+Uses [mido](https://github.com/mido/mido) for MIDI parsing!
