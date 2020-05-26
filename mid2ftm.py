@@ -26,7 +26,7 @@ def main():
     print('Track {}: {}'.format(1, track.name))
     for msg in track:
         print(msg)
-        if msg.type == 'note_on':
+        if msg.type == 'note_on' and msg.velocity != 0:
             patterns[currentPattern][3] = addToBytes( patterns[currentPattern][3], 4, 1)
             patterns[currentPattern].extend( midiNoteToRow(msg.note, msg.velocity, currentTime) )
             currentTime += 1
@@ -35,6 +35,27 @@ def main():
                 patterns.append( newPattern(0,0,currentPattern) )
                 currentTime = 0;
     
+
+    writeInstruments()
+    writeFrames()
+    writePatterns()
+
+def writeInstruments():
+    ftm_out.write("INSTRUMENTS".encode("ascii")) # Instruments block title
+    ftm_out.write(b"\x00" * 5)
+    ftm_out.write(b"\x06\x00\x00\x00")     # version 6
+    ftm_out.write(b"\x49\x01\x00\x00")     # instrument size 0x0149
+
+    ftm_out.write(b"\x01\x00\x00\x00")     # Number of instruments: 1
+    ftm_out.write(b"\x00\x00\x00\x00\x01") # Instrument index 0, 2a03
+    ftm_out.write(b"\x05\x00\x00\x00")     # 5 sequences for 2a03
+    ftm_out.write(b"\x00\x00\x00\x00\x00" * 2) # None of the 5 sequences are defined
+
+    ftm_out.write(b"\x00\x00\xff" * 96)    # DPCM samples blank for all 96 notes uwu
+    ftm_out.write(b"\x0e\x00\x00\x00")     # Instrument name length: 14
+    ftm_out.write("New instrument".encode("ascii")) # Instrument name
+
+def writeFrames():
     ftm_out.write("FRAMES".encode("ascii")) # Frames block title
     ftm_out.write(b"\x00" * 10)
     ftm_out.write(b"\x03\x00\x00\x00") # Frames block version (3)
@@ -48,8 +69,6 @@ def main():
     for i in range(0, len(patterns)):
         for j in range(0, 5):
             ftm_out.write(( i ).to_bytes(1, byteorder='little', signed=False)) # pattern
-
-    writePatterns()
 
 def writePatterns():
     ftm_out.write("PATTERNS".encode("ascii")) # Pattern block title
