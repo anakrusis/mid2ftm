@@ -1,5 +1,6 @@
 from mido import *
 from mido import MidiFile
+from mido import tick2second, second2tick, tempo2bpm
 import sys
 import math
 
@@ -11,8 +12,18 @@ ftm_out = open(path_out, "wb")
 
 patterns = [] # stores all pattern data
 
+notes = [];
+
+currentSq1Note = -1;
+
 ROW_HIGHLIGHT_1 = 4
 ROW_HIGHLIGHT_2 = 20
+
+class Note:
+    def __init__(self, p=72, t=0, ch=-1):
+        self.pitch = p;
+        self.time = t;
+        self.channel = ch;
 
 def main():
    
@@ -20,21 +31,57 @@ def main():
 
     currentPattern = 0
     patterns.append( newPattern(0,0,currentPattern) )
-    currentTime = 0
 
-    track = midi_in.tracks[1]
-    print('Track {}: {}'.format(1, track.name))
+    global bpm, tpqn;
+
+    ticksPerBeat = midi_in.ticks_per_beat
+    print("Ticks per beat: " + str(ticksPerBeat))
+
+    track = midi_in.tracks[0]
     for msg in track:
-        print(msg)
-        if msg.type == 'note_on' and msg.velocity != 0:
-            patterns[currentPattern][3] = addToBytes( patterns[currentPattern][3], 4, 1)
-            patterns[currentPattern].extend( midiNoteToRow(msg.note, msg.velocity, currentTime) )
-            currentTime += 1
-            if currentTime >= 64:
-                currentPattern += 1
-                patterns.append( newPattern(0,0,currentPattern) )
-                currentTime = 0;
+        if (msg.type == "set_tempo"):
+            bpm = round(tempo2bpm(msg.tempo))
+            print("Beats per minute: " + str(bpm))
+
+    tpqn = int(60 / ( bpm / 60 ));
+
+    trackTime = 0
+    track = midi_in.tracks[1]
+    for msg in track:
+        trackTime += msg.time
+
+        if (msg.type == "note_on" or msg.type == "note_off"):
+            
+            if (msg.velocity == 0 or msg.type == "note_off"):
+                notes.append( Note(-msg.note, trackTime) );
+            else:
+                notes.append( Note(msg.note, trackTime) );
+
+    currentPattern = 0;
+    patternTime = 0;
+    lastnotetime = 0;
     
+    for note in notes:
+        note.channel = 0; # 0 is pulse 1 for now
+
+        moddur = note.time - lastnotetime
+        moddur /= ticksPerBeat
+        moddur /= bpm
+        moddur *= 60 * 60
+        print(str(moddur))
+        
+        patternTime += moddur
+
+        patterns[currentPattern][3] = addToBytes( patterns[currentPattern][3], 4, 1)
+        patterns[currentPattern].extend( midiNoteToRow(note.pitch, 15, round(patternTime) ) )
+
+        if patternTime >= (tpqn * 4):
+            currentPattern += 1
+            patterns.append( newPattern(0,0,currentPattern) )
+            patternTime %= (tpqn * 4);
+        
+        #print( "pitch: " + str( note.pitch) + " time: " + str( note.time)  + " channel: " + str( note.channel ) )
+        lastnotetime = note.time
 
     writeInstruments()
     writeFrames()
@@ -62,9 +109,9 @@ def writeFrames():
     ftm_out.write( ( 16 + (len(patterns) * 5) ).to_bytes(4, byteorder='little', signed=False) ) # Frames block size
 
     ftm_out.write(( len(patterns) ).to_bytes(4, byteorder='little', signed=False)) # number of frames
-    ftm_out.write((2).to_bytes(4, byteorder='little', signed=False)) # speed
+    ftm_out.write((1).to_bytes(4, byteorder='little', signed=False)) # speed
     ftm_out.write((150).to_bytes(4, byteorder='little', signed=False)) # tempo
-    ftm_out.write((64).to_bytes(4, byteorder='little', signed=False)) # rows per frame
+    ftm_out.write(( tpqn * 4 ).to_bytes(4, byteorder='little', signed=False)) # rows per frame
 
     for i in range(0, len(patterns)):
         for j in range(0, 5):
@@ -78,7 +125,7 @@ def writePatterns():
 
     for pattern in patterns:
         for bytelist in pattern:
-            print(bytelist)
+            #print(bytelist)
             ftm_out.write(bytelist)
     
 
@@ -101,8 +148,12 @@ def newPattern(songIndex, channel, index):
             ]
 
 def midiNoteToRow(note, velocity, rowIndex):
-    notename = (note % 12) + 1
-    octave = math.floor(note / 12) - 2
+    if (note < 0):
+        notename = 0x0e
+        octave = 4
+    else:        
+        notename = (note % 12) + 1
+        octave = math.floor(note / 12) - 2
 
     return [ rowIndex.to_bytes(4, byteorder='little', signed=False),
              notename.to_bytes(1, byteorder='little', signed=False),
